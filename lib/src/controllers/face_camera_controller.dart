@@ -41,26 +41,30 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
   /// Set true to capture image on face detected.
   final bool autoCapture;
 
-  /// Set true to trigger onCapture even when the face is not well positioned
+  /// Set true to trigger [onCapture] even when the face is not well positioned.
   final bool ignoreFacePositioning;
 
   /// Use this to lock camera orientation.
   final CameraOrientation? orientation;
 
-  /// Use this to set your preferred performance mode.
+  /// Use this to set your preferred face-detection performance mode.
   final FaceDetectorMode performanceMode;
 
-  /// Callback invoked when camera captures image.
+  /// Callback invoked when camera captures an image.
   final void Function(File? image) onCapture;
 
-  /// Callback invoked when camera detects face.
+  /// Callback invoked when the camera detects a face.
   final void Function(Face? face)? onFaceDetected;
 
-  /// Gets all available camera lens and set current len
+  /// Single cached detector — created in [initialize], closed in [dispose].
+  FaceDetector? _faceDetector;
+
+  // ── Camera lens helpers ────────────────────────────────────────────────────
+
   void _getAllAvailableCameraLens() {
     int currentCameraLens = 0;
     final List<CameraLens> availableCameraLens = [];
-    for (CameraDescription d in FaceCamera.cameras) {
+    for (final CameraDescription d in FaceCamera.cameras) {
       final lens = EnumHandler.cameraLensDirectionToCameraLens(d.lensDirection);
       if (lens != null && !availableCameraLens.contains(lens)) {
         availableCameraLens.add(lens);
@@ -68,11 +72,8 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
     }
 
     if (defaultCameraLens != null) {
-      try {
-        currentCameraLens = availableCameraLens.indexOf(defaultCameraLens!);
-      } catch (e) {
-        logError(e.toString());
-      }
+      final idx = availableCameraLens.indexOf(defaultCameraLens!);
+      if (idx != -1) currentCameraLens = idx;
     }
 
     value = value.copyWith(
@@ -88,45 +89,43 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
                 value.availableCameraLens[value.currentCameraLens]))
         .toList();
 
-    if (cameras.isNotEmpty) {
-      final cameraController = CameraController(cameras.first,
-          EnumHandler.imageResolutionToResolutionPreset(imageResolution),
-          enableAudio: enableAudio,
-          imageFormatGroup: Platform.isAndroid
-              ? ImageFormatGroup.nv21
-              : ImageFormatGroup.bgra8888);
+    if (cameras.isEmpty) return;
 
-      await cameraController.initialize().whenComplete(() {
-        value = value.copyWith(
-            isInitialized: true, cameraController: cameraController);
-      });
+    final cameraController = CameraController(
+      cameras.first,
+      EnumHandler.imageResolutionToResolutionPreset(imageResolution),
+      enableAudio: enableAudio,
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup.nv21
+          : ImageFormatGroup.bgra8888,
+    );
 
-      await changeFlashMode(value.availableFlashMode.indexOf(defaultFlashMode));
+    await cameraController.initialize();
+    value =
+        value.copyWith(isInitialized: true, cameraController: cameraController);
 
-      await cameraController.lockCaptureOrientation(
-          EnumHandler.cameraOrientationToDeviceOrientation(orientation));
-    }
+    await changeFlashMode(value.availableFlashMode.indexOf(defaultFlashMode));
+    await cameraController.lockCaptureOrientation(
+        EnumHandler.cameraOrientationToDeviceOrientation(orientation));
 
     startImageStream();
   }
+
+  // ── Public controls ────────────────────────────────────────────────────────
 
   Future<void> changeFlashMode([int? index]) async {
     final newIndex =
         index ?? (value.currentFlashMode + 1) % value.availableFlashMode.length;
     await value.cameraController!
         .setFlashMode(EnumHandler.cameraFlashModeToFlashMode(
-            value.availableFlashMode[newIndex]))
-        .then((_) {
-      value = value.copyWith(currentFlashMode: newIndex);
-    });
+            value.availableFlashMode[newIndex]));
+    value = value.copyWith(currentFlashMode: newIndex);
   }
 
-  /// The supplied [zoom] value should be between 1.0 and the maximum supported
+  /// The supplied [zoom] value should be between 1.0 and the maximum supported.
   Future<void> setZoomLevel(double zoom) async {
-    final CameraController? cameraController = value.cameraController;
-    if (cameraController == null) {
-      return;
-    }
+    final cameraController = value.cameraController;
+    if (cameraController == null) return;
     await cameraController.setZoomLevel(zoom);
   }
 
@@ -134,36 +133,29 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
     value = value.copyWith(
         currentCameraLens:
             (value.currentCameraLens + 1) % value.availableCameraLens.length);
-    _initCamera();
+    await _initCamera();
   }
 
   Future<XFile?> takePicture() async {
-    final CameraController? cameraController = value.cameraController;
+    final cameraController = value.cameraController;
     if (cameraController == null || !cameraController.value.isInitialized) {
       logError('Error: select a camera first.');
       return null;
     }
-
     if (cameraController.value.isTakingPicture) {
-      logError('A capture is already pending');
+      logError('A capture is already pending.');
       return null;
     }
-
     try {
-      XFile file = await cameraController.takePicture();
-      return file;
+      return await cameraController.takePicture();
     } on CameraException catch (e) {
-      _showCameraException(e);
+      logError(e.code, e.description);
       return null;
     }
-  }
-
-  void _showCameraException(CameraException e) {
-    logError(e.code, e.description);
   }
 
   Future<void> startImageStream() async {
-    final CameraController? cameraController = value.cameraController;
+    final cameraController = value.cameraController;
     if (cameraController == null || !cameraController.value.isInitialized) {
       return;
     }
@@ -173,7 +165,7 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
   }
 
   Future<void> stopImageStream() async {
-    final CameraController? cameraController = value.cameraController;
+    final cameraController = value.cameraController;
     if (cameraController == null || !cameraController.value.isInitialized) {
       return;
     }
@@ -182,98 +174,81 @@ class FaceCameraController extends ValueNotifier<FaceCameraState> {
     }
   }
 
-  void _processImage(CameraImage cameraImage) async {
-    final CameraController? cameraController = value.cameraController;
-    if (!value.alreadyCheckingImage) {
-      value = value.copyWith(alreadyCheckingImage: true);
-      try {
-        await FaceIdentifier.scanImage(
-                cameraImage: cameraImage,
-                controller: cameraController,
-                performanceMode: performanceMode)
-            .then((result) async {
-          value = value.copyWith(detectedFace: result);
-
-          if (result != null) {
-            try {
-              if (result.face != null) {
-                onFaceDetected?.call(result.face);
-              }
-              if (autoCapture &&
-                  (result.wellPositioned || ignoreFacePositioning)) {
-                captureImage();
-              }
-            } catch (e) {
-              logError(e.toString());
-            }
-          }
-        });
-        value = value.copyWith(alreadyCheckingImage: false);
-      } catch (ex, stack) {
-        value = value.copyWith(alreadyCheckingImage: false);
-        logError('$ex, $stack');
-      }
-    }
-  }
-
-  @Deprecated('Use [captureImage]')
-  void onTakePictureButtonPressed() async {
-    captureImage();
-  }
-
-  void captureImage() async {
-    final CameraController? cameraController = value.cameraController;
-    try {
-      cameraController!.stopImageStream().whenComplete(() async {
-        await Future.delayed(const Duration(milliseconds: 500));
-        takePicture().then((XFile? file) {
-          /// Return image callback
-          if (file != null) {
-            onCapture.call(File(file.path));
-          }
-        });
-      });
-    } catch (e) {
-      logError(e.toString());
-    }
-  }
-
-/*  void onViewFinderTap(TapDownDetails details, BoxConstraints constraints) {
-    if (value.cameraController == null) {
+  void captureImage() {
+    final cameraController = value.cameraController;
+    if (cameraController == null) {
+      logError('captureImage called before camera was initialised.');
       return;
     }
-
-    final CameraController cameraController = value.cameraController!;
-
-    final offset = Offset(
-      details.localPosition.dx / constraints.maxWidth,
-      details.localPosition.dy / constraints.maxHeight,
-    );
-    cameraController.setExposurePoint(offset);
-    cameraController.setFocusPoint(offset);
-  }*/
-
-  Future<void> initialize() async {
-    _getAllAvailableCameraLens();
-    _initCamera();
+    cameraController.stopImageStream().then((_) async {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final file = await takePicture();
+      if (file != null) {
+        onCapture.call(File(file.path));
+      }
+    }).catchError((Object e) {
+      logError(e.toString());
+    });
   }
 
-  /// Enables controls only when camera is initialized.
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+  Future<void> initialize() async {
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        enableLandmarks: true,
+        enableTracking: true,
+        performanceMode: performanceMode,
+      ),
+    );
+    _getAllAvailableCameraLens();
+    await _initCamera();
+  }
+
+  /// Enables controls only when the camera is fully initialised.
   bool get enableControls {
-    final CameraController? cameraController = value.cameraController;
+    final cameraController = value.cameraController;
     return cameraController != null && cameraController.value.isInitialized;
   }
 
-  /// Dispose the controller.
-  ///
-  /// Once the controller is disposed, it cannot be used anymore.
   @override
   Future<void> dispose() async {
-    final CameraController? cameraController = value.cameraController;
-
+    final cameraController = value.cameraController;
     if (cameraController != null && cameraController.value.isInitialized) {
-      cameraController.dispose();
+      await cameraController.dispose();
     }
+    await _faceDetector?.close();
     super.dispose();
+  }
+
+  // ── Private ────────────────────────────────────────────────────────────────
+
+  void _processImage(CameraImage cameraImage) async {
+    final detector = _faceDetector;
+    if (detector == null || value.alreadyCheckingImage) return;
+
+    value = value.copyWith(alreadyCheckingImage: true);
+    try {
+      final result = await FaceIdentifier.scanImage(
+        cameraImage: cameraImage,
+        controller: value.cameraController,
+        faceDetector: detector,
+      );
+
+      value = value.copyWith(detectedFace: result);
+
+      if (result != null) {
+        if (result.face != null) {
+          onFaceDetected?.call(result.face);
+        }
+        if (autoCapture && (result.wellPositioned || ignoreFacePositioning)) {
+          captureImage();
+        }
+      }
+    } catch (ex, stack) {
+      logError('$ex\n$stack');
+    } finally {
+      value = value.copyWith(alreadyCheckingImage: false);
+    }
   }
 }

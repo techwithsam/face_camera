@@ -1,36 +1,44 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../../face_camera.dart';
-import '../res/app_images.dart';
+
 
 class FacePainter extends CustomPainter {
-  FacePainter(
-      {required this.imageSize,
-      this.face,
-      required this.indicatorShape,
-      this.indicatorAssetImage});
+  FacePainter({
+    required this.imageSize,
+    this.face,
+    required this.indicatorShape,
+    this.indicatorAssetImage,
+    this.repaint,
+  }) : super(repaint: repaint);
+
   final Size imageSize;
   double? scaleX, scaleY;
   final Face? face;
   final IndicatorShape indicatorShape;
   final String? indicatorAssetImage;
+
+  /// Listenable passed by [_FacePainterImageLoader] to trigger repaints when
+  /// the indicator image has been decoded.
+  final Listenable? repaint;
+
+  /// Pre-decoded image for [IndicatorShape.image]. Set externally by the
+  /// widget tree via [_FacePainterImageLoader] so that we never touch
+  /// ImageStream inside paint().
+  ui.Image? cachedIndicatorImage;
+
   @override
   void paint(Canvas canvas, Size size) {
     if (face == null) return;
 
-    Paint paint;
-
-    if (face!.headEulerAngleY! > 10 || face!.headEulerAngleY! < -10) {
-      paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..color = Colors.red;
-    } else {
-      paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3.0
-        ..color = Colors.green;
-    }
+    final bool headStraight =
+        (face!.headEulerAngleY ?? 0).abs() <= 10;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..color = headStraight ? Colors.green : Colors.red;
 
     scaleX = size.width / imageSize.width;
     scaleY = size.height / imageSize.height;
@@ -43,7 +51,7 @@ class FacePainter extends CustomPainter {
               widgetSize: size,
               scaleX: scaleX,
               scaleY: scaleY),
-          paint, // Adjust color as needed
+          paint,
         );
         break;
       case IndicatorShape.square:
@@ -63,7 +71,7 @@ class FacePainter extends CustomPainter {
               scaleX: scaleX,
               scaleY: scaleY),
           face!.boundingBox.width / 2 * scaleX!,
-          paint, // Adjust color as needed
+          paint,
         );
         break;
       case IndicatorShape.triangle:
@@ -75,32 +83,25 @@ class FacePainter extends CustomPainter {
               scaleX: scaleX,
               scaleY: scaleY,
               isInverted: indicatorShape == IndicatorShape.triangleInverted),
-          paint, // Adjust color as needed
+          paint,
         );
         break;
       case IndicatorShape.image:
-        final AssetImage image =
-            AssetImage(indicatorAssetImage ?? AppImages.faceNet);
-        final ImageStream imageStream = image.resolve(ImageConfiguration.empty);
-
-        imageStream.addListener(
-            ImageStreamListener((ImageInfo imageInfo, bool synchronousCall) {
+        final img = cachedIndicatorImage;
+        if (img != null) {
           final rect = face!.boundingBox;
-          final Rect destinationRect = Rect.fromPoints(
-            Offset(size.width - rect.left.toDouble() * scaleX!,
-                rect.top.toDouble() * scaleY!),
-            Offset(size.width - rect.right.toDouble() * scaleX!,
-                rect.bottom.toDouble() * scaleY!),
+          final destinationRect = Rect.fromPoints(
+            Offset(size.width - rect.left * scaleX!, rect.top * scaleY!),
+            Offset(size.width - rect.right * scaleX!, rect.bottom * scaleY!),
           );
-
           canvas.drawImageRect(
-            imageInfo.image,
-            Rect.fromLTRB(0, 0, imageInfo.image.width.toDouble(),
-                imageInfo.image.height.toDouble()),
+            img,
+            Rect.fromLTRB(
+                0, 0, img.width.toDouble(), img.height.toDouble()),
             destinationRect,
             Paint(),
           );
-        }));
+        }
         break;
       case IndicatorShape.none:
         break;
@@ -109,7 +110,9 @@ class FacePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(FacePainter oldDelegate) {
-    return oldDelegate.imageSize != imageSize || oldDelegate.face != face;
+    return oldDelegate.imageSize != imageSize ||
+        oldDelegate.face != face ||
+        oldDelegate.cachedIndicatorImage != cachedIndicatorImage;
   }
 }
 

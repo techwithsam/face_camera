@@ -4,20 +4,24 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'face_camera'
-  s.version          = '0.0.1'
-  s.summary          = 'A Flutter camera plugin that detects face in real-time.'
+  s.version          = '0.2.0'
+  s.summary          = 'A Flutter camera plugin that detects faces in real-time.'
   s.description      = <<-DESC
-A Flutter camera plugin that detects face in real-time.
+A Flutter camera plugin that detects faces in real-time. Supports automatic
+capture on face detection and is suitable for KYC / selfie flows.
                        DESC
-  s.homepage         = 'http://example.com'
+  s.homepage         = 'https://github.com/Conezi/face_camera'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'Conezi' => 'https://github.com/Conezi' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files     = 'Classes/**/*'
   s.dependency 'Flutter'
-  s.platform = :ios, '15.5.0'
+  s.platform         = :ios, '16.0'
 
-  # Flutter.framework does not contain a i386 slice.
-  s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
-  s.swift_version = '5.0'
+  # Flutter.framework does not contain an i386 slice.
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES',
+    'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386'
+  }
+  s.swift_version = '5.9'
 end

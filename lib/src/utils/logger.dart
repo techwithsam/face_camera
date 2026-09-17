@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 void logError(String message, [String? code]) {
   if (code != null) {
-    debugPrint('Error: $code\nError Message: $message');
+    debugPrint('Error [$code]: $message');
   } else {
-    debugPrint('Error: $code');
+    debugPrint('Error: $message');
   }
 }
